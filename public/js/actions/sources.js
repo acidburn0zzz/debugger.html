@@ -35,13 +35,6 @@ function _shouldSourceMap(generatedSource) {
   return isEnabled("sourceMaps") && generatedSource.sourceMapURL;
 }
 
-function _addSource(source) {
-  return {
-    type: constants.ADD_SOURCE,
-    source
-  };
-}
-
 async function _prettyPrintSource({ source, sourceText, url }) {
   const contentType = sourceText ? sourceText.contentType : null;
   const indent = 2;
@@ -65,6 +58,19 @@ async function _prettyPrintSource({ source, sourceText, url }) {
   return code;
 }
 
+function _onNewSource(source, dispatch, getState) {
+  if (_shouldSourceMap(source)) {
+    dispatch(loadSourceMap(source));
+  }
+
+  // If a request has been made to show this source, go ahead and
+  // select it.
+  const pendingLocation = getPendingSelectedLocation(getState());
+  if (pendingLocation && pendingLocation.url === source.url) {
+    dispatch(selectSource(source.id, { line: pendingLocation.line }));
+  }
+}
+
 /**
  * Handler for the debugger client's unsolicited newSource notification.
  * @memberof actions/sources
@@ -72,18 +78,28 @@ async function _prettyPrintSource({ source, sourceText, url }) {
  */
 function newSource(source) {
   return ({ dispatch, getState }) => {
-    if (_shouldSourceMap(source)) {
-      dispatch(loadSourceMap(source));
-    }
+    dispatch({
+      type: constants.ADD_SOURCE,
+      source
+    });
+    _onNewSource(source, dispatch, getState);
+  };
+}
 
-    dispatch(_addSource(source));
+function newSources(sources) {
+  return ({ dispatch, getState }) => {
+    const newSources = sources.filter(source => {
+      return !getSource(getState(), source.id);
+    });
 
-    // If a request has been made to show this source, go ahead and
-    // select it.
-    const pendingLocation = getPendingSelectedLocation(getState());
-    if (pendingLocation && pendingLocation.url === source.url) {
-      dispatch(selectSource(source.id, { line: pendingLocation.line }));
-    }
+    dispatch({
+      type: constants.ADD_SOURCES,
+      sources: newSources
+    });
+
+    newSources.forEach(source => {
+      _onNewSource(source, dispatch, getState);
+    });
   };
 }
 
@@ -237,7 +253,10 @@ function togglePrettyPrint(id) {
 
     const url = source.url + ":formatted";
     const originalSource = makeOriginalSource({ url, source });
-    dispatch(_addSource(originalSource));
+    dispatch({
+      type: constants.ADD_SOURCE,
+      source: originalSource
+    });
 
     return dispatch({
       type: constants.TOGGLE_PRETTY_PRINT,
@@ -398,6 +417,7 @@ function getTextForSources(actors) {
 
 module.exports = {
   newSource,
+  newSources,
   selectSource,
   selectSourceURL,
   closeTab,
